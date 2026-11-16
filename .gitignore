@@ -6,3 +6,11 @@ node_modules/
 frontend/dist/
 .pytest_cache/
 pytest-cache-files-*/
+.rocketride/
+.env
+.env.*
+!.env.example
+.local/
+firmware/**/secrets.h
+firmware/**/build/
+*.sqlite3-*
