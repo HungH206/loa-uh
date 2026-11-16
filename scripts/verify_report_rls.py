@@ -86,6 +86,28 @@ with tempfile.TemporaryDirectory(prefix='loa-rls-') as directory:
           if (select count(*) from public.incident_reports) <> 2 then raise exception 'unexpected row count'; end if;
         end $$;
         """)
+        sql((ROOT/'supabase/migrations/202611150002_user_preferences.sql').read_text())
+        sql("""
+        set role authenticated;
+        set request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+        insert into public.user_preferences(user_id) values(auth.uid());
+        update public.user_preferences set threshold=-30 where user_id=auth.uid();
+        set request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
+        do $$ begin
+          if (select count(*) from public.user_preferences) <> 0 then raise exception 'preferences leaked'; end if;
+          begin
+            insert into public.user_preferences(user_id) values('11111111-1111-4111-8111-111111111111');
+            raise exception 'foreign preferences insert allowed';
+          exception when insufficient_privilege then null; end;
+        end $$;
+        insert into public.user_preferences(user_id) values(auth.uid());
+        update public.user_preferences set threshold=-25 where user_id='11111111-1111-4111-8111-111111111111';
+        reset role;
+        do $$ begin
+          if (select threshold from public.user_preferences where user_id='11111111-1111-4111-8111-111111111111') <> -30 then
+            raise exception 'foreign preferences update allowed'; end if;
+        end $$;
+        """)
         print('PostgreSQL checks passed: schema, rerun, own reads/inserts, cross-account isolation, retry deduplication, denied anonymous/update/delete access.')
     except subprocess.CalledProcessError as error:
         raise SystemExit(error.stderr)

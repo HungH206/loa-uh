@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {api} from './auth';
+import {api, cloudMode} from './auth';
 
 export function BrowserMicrophone({onConnected, onError}) {
   const [inputs, setInputs] = useState([]), [selected, setSelected] = useState('');
@@ -9,6 +9,7 @@ export function BrowserMicrophone({onConnected, onError}) {
     generation.current++;
     const r = resources.current;
     resources.current = null;
+    if (r?.deviceId && cloudMode) api('browser/stop',{method:'POST',body:JSON.stringify({device_id:r.deviceId})}).catch(() => {});
     if (r) {clearTimeout(r.timer); r.stream.getTracks().forEach(t => t.stop()); r.context?.close().catch(() => {});}
     setActive(false);
   }
@@ -38,6 +39,7 @@ export function BrowserMicrophone({onConnected, onError}) {
       setSelected(track.getSettings().deviceId || '');
       const registered = await api('devices/browser', {method:'POST',body:JSON.stringify({label:track.label || 'Browser microphone'})});
       if (resources.current !== r) return;
+      r.deviceId = registered.device_id;
       const boot = crypto.randomUUID().replaceAll('-',''); let sequence = 0;
       const samples = new Float32Array(analyser.fftSize);
       setActive(true); onConnected(registered.device_id);
@@ -57,7 +59,7 @@ export function BrowserMicrophone({onConnected, onError}) {
     } catch (e) {if (attempt === generation.current) {stop(); onError(e.name === 'NotAllowedError' ? 'Microphone permission was denied. Allow access in your browser’s site settings, then try again.' : e.message);}}
     finally {setBusy(false);}
   }
-  return <section className="panel pairing"><h2>Use this device’s microphone</h2><p>Allow microphone access to use your phone, laptop, or a connected headset. Only sound-level numbers are sent; raw audio stays on this device.</p>
+  return <section className="panel pairing"><h2>Use this device’s microphone</h2><p>Allow microphone access to use your phone, laptop, or a connected headset. {cloudMode ? 'Sound levels and alerts stay in this page session and clear when you reload. Raw audio is never uploaded.' : 'Only sound-level numbers are sent; raw audio stays on this device.'}</p>
     {inputs.length > 0 && <label>Audio input <select value={selected} disabled={active || busy} onChange={e => setSelected(e.target.value)}>{inputs.map((d,i) => <option key={d.deviceId || i} value={d.deviceId}>{d.label || `Microphone ${i+1}`}</option>)}</select></label>}
     <button className="save" disabled={busy} onClick={active ? stop : start}>{busy ? 'Requesting microphone…' : active ? 'Stop microphone' : 'Allow microphone & start'}</button>
     <p role="status">{active ? 'Microphone active. Keep this page visible. Stop before switching inputs.' : 'Microphone off. Available inputs appear after permission is granted.'}</p><p>Headsets appear only when your operating system and browser expose their microphone. This measures ambient input, not headphone playback or listening volume. Monitoring stops when the page is hidden.</p></section>;

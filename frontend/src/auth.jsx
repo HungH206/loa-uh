@@ -1,25 +1,57 @@
 import React, {useEffect, useState} from 'react';
 import {createClient} from '@supabase/supabase-js';
+import {cloudRequest} from './cloud-api';
+import {SessionMonitor} from './session-monitor';
 
-export const backendOrigin = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '');
+const env = import.meta.env;
+export const backendOrigin = (env.VITE_BACKEND_URL || '').replace(/\/$/, '');
+export const cloudMode = Boolean(env.VITE_SUPABASE_URL && env.VITE_SUPABASE_PUBLISHABLE_KEY);
 export let supabase = null;
+let monitor, owner, hubCache = [], nextHubAttempt = 0;
+function localMonitor(user) {
+  if (owner !== user) {owner=user;hubCache=[];nextHubAttempt=0;monitor=new SessionMonitor(event => window.dispatchEvent(new CustomEvent('loa-local',{detail:event})));}
+  return monitor;
+}
 export async function accessToken() {
   if (!supabase) return null;
-  const {data, error} = await supabase.auth.getSession();
+  const {data,error} = await supabase.auth.getSession();
   if (error) throw error;
   return data.session?.access_token;
 }
-export async function api(path, options = {}) {
+export async function hubApi(path,options={}) {
   const token = await accessToken();
-  const response = await fetch(`${backendOrigin}/api/${path}`, {...options, headers: {
-    ...(options.body ? {'Content-Type':'application/json'} : {}),
-    ...options.headers, ...(token ? {Authorization:`Bearer ${token}`} : {})
-  }});
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(typeof body.detail === 'string' ? body.detail : `Request failed (${response.status})`);
-  }
+  const response = await fetch(`${backendOrigin}/api/${path}`,{...options,signal:AbortSignal.timeout(5000),headers:{...(options.body ? {'Content-Type':'application/json'} : {}),...options.headers,...(token ? {Authorization:`Bearer ${token}`} : {})}});
+  if (!response.ok) {const b=await response.json().catch(()=>({}));throw new Error(typeof b.detail === 'string' ? b.detail : `Request failed (${response.status})`);}
   return response.json();
+}
+export async function api(path, options={}) {
+  if (!cloudMode) return hubApi(path,options);
+  const {data,error}=await supabase.auth.getSession();
+  if(error || !data.session) throw new Error('Sign in again to continue.');
+  const user=data.session.user.id, m=localMonitor(user), resource=path.split('?')[0];
+  if(resource==='reports' || resource==='settings') {
+    const result=await cloudRequest({url:env.VITE_SUPABASE_URL.replace(/\/$/,''),key:env.VITE_SUPABASE_PUBLISHABLE_KEY,token:data.session.access_token,user},path,options);
+    if(resource==='settings') m.preferences(result);
+    return result;
+  }
+  if(resource==='devices/browser') return m.register(JSON.parse(options.body).label);
+  if(resource==='browser/readings') return m.record(JSON.parse(options.body));
+  if(resource==='browser/stop'){m.stop(JSON.parse(options.body).device_id);return {};}
+  if(resource==='devices/claim') {try{return await hubApi(path,options);}catch(e){throw new Error(`Cannot pair while the hub is unavailable: ${e.message}`);}}
+  if(['status','alerts','readings'].includes(resource)) {
+    let remote=null;
+    if(backendOrigin && Date.now()>=nextHubAttempt) {
+      try{remote=await hubApi(path,options);}catch{nextHubAttempt=Date.now()+30000;}
+    }
+    if(resource==='status') {
+      if(remote)hubCache=remote.devices;
+      return {...remote,hub_online:Boolean(remote),mqtt_connected:remote?.mqtt_connected || false,mqtt_configured:Boolean(backendOrigin),devices:[...m.devices,...hubCache.map(d=>remote ? d : {...d,last_seen:null})]};
+    }
+    if(resource==='alerts')return [...m.alerts,...(remote || [])].sort((a,b)=>b.triggered_at-a.triggered_at).slice(0,100);
+    const cutoff=Date.now()/1000-Number(new URLSearchParams(path.split('?')[1]).get('minutes') || 60)*60;
+    return [...(remote || []),...m.rows.filter(r=>r.received_at>=cutoff)];
+  }
+  return hubApi(path,options);
 }
 
 export function AuthGate({children}) {
@@ -27,12 +59,12 @@ export function AuthGate({children}) {
   const [ready, setReady] = useState(false), [error, setError] = useState('');
   useEffect(() => {
     let stopped = false, subscription;
-    fetch(`${backendOrigin}/api/config`).then(r => {if (!r.ok) throw new Error('Cannot load server configuration'); return r.json();}).then(async c => {
+    (cloudMode ? Promise.resolve({auth_mode:'supabase',supabase_url:env.VITE_SUPABASE_URL,supabase_publishable_key:env.VITE_SUPABASE_PUBLISHABLE_KEY,report_store:'supabase'}) : fetch(`${backendOrigin}/api/config`,{signal:AbortSignal.timeout(8000)}).then(r => {if (!r.ok) throw new Error('Cannot load server configuration'); return r.json();})).then(async c => {
       if (stopped) return;
       setConfig(c);
       if (c.auth_mode === 'demo') {setReady(true); return;}
       if (!c.supabase_url || !c.supabase_publishable_key) throw new Error('Configure Supabase on the backend to enable accounts. See README.md.');
-      if (!supabase) supabase = createClient(c.supabase_url, c.supabase_publishable_key);
+      if (!supabase) supabase = createClient(c.supabase_url, c.supabase_publishable_key, {global:{fetch:(url,options={}) => fetch(url,{...options,signal:options.signal || AbortSignal.timeout(12000)})}});
       const {data} = supabase.auth.onAuthStateChange((_event, s) => {if (!stopped) {setSession(s); setReady(true);}});
       subscription = data.subscription;
       const {data: initial, error: authError} = await supabase.auth.getSession();

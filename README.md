@@ -130,3 +130,7 @@ Use the **Report disturbance** button or navigation tab. LOA freezes the inciden
 Reports do not require a microphone or an automatic threshold exceedance. They are saved to the signed-in account in Supabase Postgres when cloud reports are enabled (otherwise in the Pi's SQLite database) and displayed as the latest 50 incidents on the Reports screen. `GET /api/reports` and `POST /api/reports` require account authentication; retrying a submission with the same request ID does not create another report. Reports are personal records and are not forwarded to a landlord, authority, or other recipient. Explicit local demo mode shares its reports like its other demo data.
 
 See [docs/SUPABASE_REPORTS.md](docs/SUPABASE_REPORTS.md) for cloud report setup, migration of existing incidents, privacy policies, and the developer Table Editor/SQL view.
+
+## Cloud-first frontend and optional Pi
+
+With `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` set, the frontend starts and uses reports/preferences directly through Supabase without the Pi. Browser microphone monitoring runs in the page session. The Pi remains optional for cloud features and required for ESP32 pairing, live data, and stored sensor history. See [docs/CLOUD_FIRST.md](docs/CLOUD_FIRST.md) for configuration, preferences policies, and verification limits.
