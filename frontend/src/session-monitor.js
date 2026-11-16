@@ -10,9 +10,9 @@ export class SessionMonitor {
     const d=this.devices.find(v=>v.device_id===data.device_id);if(!d)throw new Error('Start this microphone again.');
     const now=this.now();d.last_seen=now;
     const row={...data,id:'local-'+(++this.counter),source:'browser',received_at:now};this.rows.push(row);this.rows=this.rows.slice(-10000);
-    let s=this.states.get(d.device_id);
+    let s=this.states.get(d.device_id);const previousAlert=s?.lastAlert ?? null;
     if(s && (now-s.last>2.5 || s.boot!==data.boot_id)){if(s.event&&!s.event.ended_at){s.event.ended_at=s.last;s.event.end_reason='sensor_gap';}s=null;}
-    if(!s){s={boot:data.boot_id,last:now,above:null,lastAlert:null,event:null};this.states.set(d.device_id,s);}
+    if(!s){s={boot:data.boot_id,last:now,above:null,lastAlert:previousAlert,event:null};this.states.set(d.device_id,s);}
     const p=this.settings;
     if(data.dbfs>=p.threshold){
       if(s.above===null)s.above=now;

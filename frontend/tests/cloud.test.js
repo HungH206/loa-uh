@@ -40,3 +40,10 @@ test('reporting gaps cannot satisfy duration and separate sessions share no data
  m.record({device_id:d.device_id,dbfs:-20,boot_id:'one'});now=1010;m.record({device_id:d.device_id,dbfs:-20,boot_id:'one'});
  assert.equal(m.alerts.length,0);assert.equal(new SessionMonitor().rows.length,0);
 });
+
+test('a reporting gap preserves the minimum interval between alerts',()=>{
+ let now=1000;const m=new SessionMonitor(()=>{},()=>now);const d=m.register('Input');
+ for(let i=0;i<4;i++){now=1000+i;m.record({device_id:d.device_id,dbfs:-20,boot_id:'one'});}
+ for(let i=0;i<4;i++){now=1010+i;m.record({device_id:d.device_id,dbfs:-20,boot_id:'one'});}
+ assert.equal(m.alerts.length,1);
+});
