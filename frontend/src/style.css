@@ -13,3 +13,5 @@
 @media(max-width:700px){.hub-panel{position:fixed;left:16px;right:16px;top:72px;width:auto;max-height:calc(100vh - 96px);overflow:auto}.account-actions{flex-wrap:wrap;justify-content:flex-end}}
 .hub-actions .save{margin:0;height:34px}
 .hub-link{display:inline-flex;align-items:center;gap:8px;margin-top:12px;background:#fff;border:1px solid #dde3d9;border-radius:6px;padding:10px 14px;font-size:11px;color:#53614f;text-decoration:none}
+
+.esp32-connect{margin:0 0 20px}.esp32-connect>.export{font-size:14px}.esp32-panel{margin-top:12px}.esp32-panel p,.esp32-panel li{font-size:14px;line-height:1.7;color:#53674e}.esp32-panel>p{margin-top:14px}.esp32-panel ol{padding-left:22px}.esp32-panel .save,.esp32-panel .text-button{font-size:14px}.esp32-panel .hub-actions{margin-top:16px}.esp32-label{display:grid;gap:8px;margin-top:16px;font-size:14px}.esp32-label select{width:100%;max-width:440px;padding:10px;border:1px solid #ccd6c7;border-radius:6px;background:white;color:#25372e}
