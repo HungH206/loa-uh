@@ -144,6 +144,10 @@ Per-sensor figures are computed from stored readings, so they cover only the sig
 
 **Live demo of connectivity:** open the Network tab, then switch off the Wi-Fi access point (or carry the sensor out of range). The sensor turns amber, then red; the chart drops to zero. Restore Wi-Fi and a "Sensor reconnected" event appears with the outage length and how many readings were lost.
 
+## Class demo
+
+[docs/DEMO.md](docs/DEMO.md) is the step-by-step runbook: one-time Pi, hotspot and ESP32 setup, a 10-minute live demo script, and fallbacks.
+
 ## Networking experiments
 
 [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) covers the proposal's experiments: MQTT vs. HTTP, 1/5/10 Hz send rates, Wi-Fi disconnection and recovery, and MQTT QoS 0 vs. 1. The firmware takes `LOA_PUBLISH_HZ` and `LOA_TRANSPORT_HTTP` build flags. `experiments/` contains a synthetic sensor (`python -m experiments.load`), a delivery/latency/outage analyzer for the SQLite data (`python -m experiments.analyze`), a standard-library tcpdump summarizer (`python -m experiments.pcap_summary`), a live broker monitor that also runs on the Pi (`python -m experiments.monitor`), and PNG charts (`python -m experiments.plot`, needs `requirements-experiments.txt`). Record results in [docs/EXPERIMENT_RESULTS.md](docs/EXPERIMENT_RESULTS.md). Captures contain device tokens and are git-ignored under `experiments/captures/`.
