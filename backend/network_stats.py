@@ -92,6 +92,7 @@ def device_summary(device, rows, now):
     summary['delivery'] = {'window_seconds': DELIVERY_SECONDS, 'received': received, 'expected': expected,
                            'lost': expected - received,
                            'ratio': round(received / expected, 4) if expected else None}
+    summary['packets'] = packet_summary(recent)
 
     latencies = [(r['received_at'] - r['timestamp']) * 1000 for r in recent if r['timestamp'] is not None]
     summary['latency_ms'] = None if not latencies else {
@@ -123,6 +124,34 @@ def device_summary(device, rows, now):
     if rows:
         summary['boot_id'], summary['last_sequence'] = rows[-1]['boot_id'], rows[-1]['sequence']
     return summary
+
+
+def packet_summary(rows):
+    """Application message gaps, separated by boot; late arrivals fill earlier gaps.
+
+    Only MQTT/HTTP sensor messages with a boot ID and sequence are eligible.
+    Missing prefixes and trailing silence cannot be inferred from this sample.
+    """
+    eligible = [r for r in rows if r['source'] in ('mqtt', 'http')
+                and r['boot_id'] and r['sequence'] is not None]
+    boots = {}
+    for r in eligible:
+        boots.setdefault(r['boot_id'], set()).add(r['sequence'])
+    gaps = []
+    for boot, sequences in boots.items():
+        ordered = sorted(sequences)
+        for left, right in zip(ordered, ordered[1:]):
+            if right > left + 1:
+                gaps.append({'boot_id': boot, 'first': left + 1,
+                             'last': right - 1, 'count': right - left - 1})
+    received = sum(len(s) for s in boots.values())
+    missing = sum(g['count'] for g in gaps)
+    expected = received + missing
+    return {'window_seconds': DELIVERY_SECONDS, 'received': received, 'missing': missing,
+            'expected': expected, 'loss_percent': round(missing / expected * 100, 2) if expected else None,
+            'gaps': gaps[-100:], 'gap_count': len(gaps),
+            'recent': [{'received_at': r['received_at'], 'boot_id': r['boot_id'],
+                        'sequence': r['sequence'], 'source': r['source']} for r in eligible[-100:]][::-1]}
 
 
 def network_summary(db, user, link, mqtt_configured, mqtt_connected, mqtt_endpoint, now=None):
