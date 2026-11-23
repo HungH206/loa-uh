@@ -44,7 +44,7 @@ def main():
             password_path.unlink(missing_ok=True)
             raise
         acl = ROOT/'.local/mqtt-acl'
-        private_write(acl, f'user loa-backend\ntopic read loa/+/noise\n\nuser {args.device}\ntopic write loa/{args.device}/noise\n')
+        private_write(acl, f'user loa-backend\ntopic read loa/+/noise\ntopic read $SYS/#\n\nuser {args.device}\ntopic write loa/{args.device}/noise\n')
         broker = ROOT/'.local/mosquitto.conf'
         private_write(broker, f'listener 1883 0.0.0.0\nallow_anonymous false\npassword_file {password_path}\nacl_file {acl}\npersistence false\nlog_type error\nlog_type warning\nlog_type notice\n')
         for key, value in {'MQTT_HOST':'127.0.0.1','MQTT_PORT':'1883','MQTT_USERNAME':'loa-backend','MQTT_PASSWORD':broker_password}.items():

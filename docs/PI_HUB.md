@@ -100,3 +100,12 @@ Back up the live SQLite database using SQLite's backup facility, not just a copy
 Open the Pi address rather than localhost after cutover. Sign in again because browser sessions are specific to the origin. Browser microphones require the HTTPS address; LAN HTTP remains suitable for viewing the ESP32 dashboard. Confirmation-link redirects for this HTTPS origin may still need configuration in Supabase. Physical phone testing, a full Pi reboot test, alert acceptance tests, and network performance experiments remain separate checks.
 
 A dedicated migration SSH key is stored in the ignored `.local/pi-ssh` on the Mac and authorized under the Pi account. Keep the private key private. You can revoke it later by removing the `loa-pi-migration` public-key line from the Pi's `~/.ssh/authorized_keys`.
+
+## Updating the Pi after code changes
+
+The installer keeps the Pi's database, `/etc/loa/loa.env`, broker passwords and ACL, so it is safe to rerun for code updates (for example, the Network tab).
+
+1. On the Mac, build the frontend the same way as for the first install, and run `.venv/bin/python scripts/prepare_pi.py`.
+2. Copy and extract the bundle as above, then run `sudo bash deploy/pi/install.sh` again. It replaces `/opt/loa/backend` and the dashboard and restarts the service.
+3. For the Network tab's broker card, add `topic read $SYS/#` under `user loa-backend` in `/etc/mosquitto/loa/acl`, then run `sudo systemctl reload mosquitto`. The installer does not change an existing ACL.
+4. If you also host the dashboard on Vercel, redeploy it so the Network tab appears there. It reads `/api/network` from the hub at `VITE_BACKEND_URL`.

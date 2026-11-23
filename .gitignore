@@ -14,3 +14,6 @@ pytest-cache-files-*/
 firmware/**/secrets.h
 firmware/**/build/
 *.sqlite3-*
+experiments/captures/
+*.pcap
+*.pcapng

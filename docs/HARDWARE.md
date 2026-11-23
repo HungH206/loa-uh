@@ -2,7 +2,7 @@
 
 ## Target and dependencies
 
-XIAO ESP32-S3 **Sense**, with the Sense microphone board attached, using PDM clock GPIO 42 and data GPIO 41. A generic ESP32-S3 without a microphone is not equivalent. Install ESP32 Arduino core 3.x and PubSubClient. The sketch captures 16-bit mono audio at 16 kHz and calculates DC-corrected RMS over 16,000 samples for each report.
+XIAO ESP32-S3 **Sense**, with the Sense microphone board attached, using PDM clock GPIO 42 and data GPIO 41. A generic ESP32-S3 without a microphone is not equivalent. Install ESP32 Arduino core 3.x and PubSubClient. The sketch captures 16-bit mono audio at 16 kHz and calculates DC-corrected RMS over 16,000 samples for each report (one second). The `LOA_PUBLISH_HZ` and `LOA_TRANSPORT_HTTP` build flags change the report rate and transport for the networking experiments; see [EXPERIMENTS.md](EXPERIMENTS.md).
 
 Each payload contains relative dBFS, RMS, boot ID, sequence, and uptime. No audio leaves the device. The backend evaluates the user's preferences, so changing tolerance does not require reflashing. The sketch removes the old fixed local `-40 dBFS` alert rule.
 

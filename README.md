@@ -2,6 +2,8 @@
 
 Personalized IoT noise monitoring for a XIAO ESP32-S3 Sense, a laptop/Raspberry Pi, and a phone browser. FastAPI + SQLite + React, Supabase email/password accounts, MQTT sensor ingestion, and private WebSocket updates.
 
+> **Hardware note:** The project proposal names an Arduino UNO Q as the sensor node. This implementation uses a Seeed XIAO ESP32-S3 Sense instead, programmed with the Arduino framework (Arduino IDE / `arduino-cli` with the esp32 board package). It fills the same role, a Wi-Fi MQTT data producer for the Raspberry Pi 5. Its onboard microphone and Wi-Fi in one module avoid the UNO Q's external microphone wiring and its split between a Linux processor and a microcontroller. That keeps the project focused on the networking experiments, and the networking concepts and experiments are unchanged.
+
 ```text
 PDM microphone → ESP32-S3 → Wi-Fi/MQTT → Mosquitto → FastAPI/SQLite → phone dashboard
                                                       ↑
@@ -82,7 +84,8 @@ Except `/api/config` and device ingestion, APIs require `Authorization: Bearer <
 | `POST /api/readings` | Device-token-authenticated numeric measurement ingestion |
 | `GET/PUT /api/settings` | Own threshold, duration, and cooldown |
 | `GET /api/alerts` | Own latest 50 events, newest first |
-| `/ws` | Send `{"type":"auth","token":"<access token>"}` as first frame; then private readings/settings updates |
+| `GET /api/network` | Network tab: own sensors' rate, delivery, latency, outages; backend↔broker link; Mosquitto `$SYS` load |
+| `/ws` | Send `{"type":"auth","token":"<access token>"}` as first frame; then private readings/settings updates. `{"type":"ping","id":n}` is answered with `{"type":"pong","id":n}` |
 
 Canonical sensor payload, MQTT topic `loa/loa-001/noise`:
 
@@ -90,7 +93,7 @@ Canonical sensor payload, MQTT topic `loa/loa-001/noise`:
 {"device_id":"loa-001","boot_id":"ac65e84013ad8270","sequence":42,"dbfs":-38.7,"rms":380.0,"uptime_ms":42000}
 ```
 
-`timestamp` is optional Unix seconds from a synchronized clock. The firmware does not send one. MQTT topic and payload device ID must match; the broker ACL enforces publisher identity. Firmware publishes QoS 0 using PubSubClient; the backend subscribes at QoS 1, which does not upgrade publisher QoS. No retained sensor messages.
+`timestamp` is optional Unix seconds from a synchronized clock. The firmware sends it once NTP has set its clock; it is stored for latency measurement only and never drives alert timing. MQTT topic and payload device ID must match; the broker ACL enforces publisher identity. Firmware publishes QoS 0 using PubSubClient; the backend subscribes at QoS 1, which does not upgrade publisher QoS. No retained sensor messages.
 
 CSV export and charts cover the selected microphone/time range, subject to the 10,000-reading cap. The average card is the arithmetic mean of reported dBFS values, not an acoustic Leq measurement.
 
@@ -113,6 +116,26 @@ npm run build
 
 Tests cover account isolation, one-time pairing, device credentials, private WebSockets, validation, duration/cooldown/peak tracking, duplicates, sensor gaps/reboots, persistence, and mocked Supabase token verification. Physical Wi-Fi/microphone behavior, real email delivery/login, and iPhone rendering require device checks.
 
+## Network tab: showing connectivity
+
+The dashboard's **Network** tab shows the whole path a reading takes, refreshed every 2 seconds: **sensor → (Wi-Fi, MQTT) → Mosquitto broker → backend → (WebSocket) → this browser**. Each hop is green (working), amber (sensor silent for more than 3 s), red (down) or grey (not used; for example, the broker is bypassed when a sensor sends over HTTP).
+
+- **Sensor:** readings per second over the last 10 s, and seconds since the last reading.
+- **Delivery over the last 5 minutes:** received vs. expected, from gaps in sequence numbers.
+- **One-way latency (p50/p95):** needs the sensor's NTP send time, so the updated firmware.
+- **Broker:** connected clients, messages and bytes per minute from Mosquitto's `$SYS` statistics. This needs `topic read $SYS/#` for `loa-backend` in the broker ACL; see [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
+- **Backend ↔ broker link:** status and connect time.
+- **Browser ↔ Pi:** WebSocket round-trip time from a ping every 2 s.
+- **Charts and events:** a readings-per-second chart for the last 2 minutes, and an event list of outages (with readings lost), sensor restarts, transport changes and broker disconnects from the last 15 minutes.
+
+Per-sensor figures are computed from stored readings, so they cover only the signed-in account's own sensors and survive backend restarts. Broker and link figures are kept in memory by the single backend worker.
+
+**Live demo of connectivity:** open the Network tab, then switch off the Wi-Fi access point (or carry the sensor out of range). The sensor turns amber, then red; the chart drops to zero. Restore Wi-Fi and a "Sensor reconnected" event appears with the outage length and how many readings were lost.
+
+## Networking experiments
+
+[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) covers the proposal's experiments: MQTT vs. HTTP, 1/5/10 Hz send rates, Wi-Fi disconnection and recovery, and MQTT QoS 0 vs. 1. The firmware takes `LOA_PUBLISH_HZ` and `LOA_TRANSPORT_HTTP` build flags. `experiments/` contains a synthetic sensor (`python -m experiments.load`), a delivery/latency/outage analyzer for the SQLite data (`python -m experiments.analyze`), a standard-library tcpdump summarizer (`python -m experiments.pcap_summary`), a live broker monitor that also runs on the Pi (`python -m experiments.monitor`), and PNG charts (`python -m experiments.plot`, needs `requirements-experiments.txt`). Record results in [docs/EXPERIMENT_RESULTS.md](docs/EXPERIMENT_RESULTS.md). Captures contain device tokens and are git-ignored under `experiments/captures/`.
+
 ## Data and deployment notes
 
 SQLite is the application data store; Supabase provides authentication and, when `LOA_REPORT_STORE=supabase`, Postgres storage for incident reports. Back up `LOA_DB`; there is no retention policy or cloud preference synchronization across separate backend installations. Existing legacy `readings/settings/alerts` tables are preserved but not displayed, because their positive, uncalibrated values cannot be converted truthfully to dBFS. New data uses `sound_readings`, `preferences`, `devices`, `noise_events`, and `alert_state`.
@@ -121,7 +144,7 @@ The supplied LAN setup uses HTTP and unencrypted MQTT with authentication. Keep 
 
 ## Raspberry Pi main hub
 
-The current hardware path uses ESP32-S3; Arduino UNO Q implementation is deferred. See [docs/PI_HUB.md](docs/PI_HUB.md) for the private migration bundle, Pi installation, automatic startup, firmware cutover, and acceptance checks. Prepare the bundle with `.venv/bin/python scripts/prepare_pi.py` after building the frontend for same-origin hosting. Migration has not completed until the Pi is installed and receiving live sensor readings.
+The sensor node is the ESP32-S3 (see the hardware note at the top); the Arduino UNO Q is not used. See [docs/PI_HUB.md](docs/PI_HUB.md) for the private migration bundle, Pi installation, automatic startup, firmware cutover, and acceptance checks. Prepare the bundle with `.venv/bin/python scripts/prepare_pi.py` after building the frontend for same-origin hosting. Migration has not completed until the Pi is installed and receiving live sensor readings.
 
 ## Noise disturbance reports
 

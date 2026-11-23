@@ -322,3 +322,39 @@ def test_cloud_report_failures_preserve_legacy_and_do_not_fallback(setup, monkey
     with main.connect() as db:
         assert db.execute('select count(*) from report_cloud_sync').fetchone()[0] == 0
         assert db.execute('select count(*) from disturbance_reports').fetchone()[0] == 1
+
+
+def test_network_tab_statistics_and_websocket_ping(setup, monkeypatch):
+    main, client = setup
+    assert client.get('/api/network').status_code == 401
+    clock = {'now': 999.0}
+    monkeypatch.setattr(main.time, 'time', lambda: clock['now'])
+    assert pair(client).status_code == 200  # Readings before pairing are hidden, so pair first.
+    for sequence in range(5):  # 1 Hz with an NTP send time 20 ms before arrival.
+        clock['now'] = 1000.0 + sequence
+        client.post('/api/readings', headers=auth('device-secret'), json={
+            'device_id': 'sensor-a', 'dbfs': -60, 'sequence': sequence, 'boot_id': 'b1', 'timestamp': clock['now'] - 0.02})
+    clock['now'] = 1010.0  # Outage: sequences 5–9 never arrive.
+    send(client, -60, 10, boot='b1')
+    clock['now'] = 1011.0
+    main.broker_link.sys_message('$SYS/broker/clients/connected', b'2', now=1011.0)
+    main.broker_link.sys_message('$SYS/broker/load/messages/received/1min', b'60.5', now=1011.0)
+    main.broker_link.connected(now=900.0)
+    data = client.get('/api/network', headers=auth()).json()
+    device, = data['devices']
+    assert device['online'] and device['last_source'] == 'http'
+    assert device['delivery'] == {'window_seconds': 300, 'received': 6, 'expected': 11, 'lost': 5, 'ratio': 0.5455}
+    assert device['latency_ms']['p50'] == pytest.approx(20, abs=0.5) and not device['latency_ms']['clock_warning']
+    assert device['rate_hz'] == 0.5 and sum(p['count'] for p in device['series']) == 6
+    outage, = [e for e in device['events'] if e['kind'] == 'sensor_recovered']
+    assert outage['outage_seconds'] == 6.0 and outage['lost'] == 5
+    assert data['broker']['available'] and data['broker']['clients_connected'] == 2 and data['broker']['messages_in_per_min'] == 60.5
+    assert data['link_events'][0]['kind'] == 'broker_connected'
+    assert client.get('/api/network', headers=auth('bob')).json()['devices'] == []  # Other accounts see nothing.
+    clock['now'] = 1100.0
+    assert client.get('/api/network', headers=auth()).json()['broker']['available'] is False  # Stale $SYS hidden.
+    with client.websocket_connect('/ws') as ws:
+        ws.send_json({'type': 'auth', 'token': 'alice'})
+        assert ws.receive_json()['type'] == 'ready'
+        ws.send_json({'type': 'ping', 'id': 7})
+        assert ws.receive_json() == {'type': 'pong', 'id': 7}

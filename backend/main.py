@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import math
 import os
@@ -19,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from backend.report_store import SupabaseReports, iso_time
+from backend.network_stats import BrokerLink, network_summary
 
 DB_PATH = os.getenv('LOA_DB', 'loa.sqlite3')
 AUTH_MODE = os.getenv('LOA_AUTH_MODE', 'supabase')
@@ -31,6 +33,7 @@ DEVICE_ID_PATTERN = r'^[A-Za-z0-9_-]{1,64}$'
 DEMO_USER = 'local-demo'
 clients: dict[WebSocket, str] = {}
 mqtt_connected = False
+broker_link = BrokerLink()
 log = logging.getLogger('loa')
 
 
@@ -290,15 +293,24 @@ async def lifespan(app):
             mqtt_connected = reason_code == 0
             if mqtt_connected:
                 client.subscribe('loa/+/noise', qos=1)
+                # Broker statistics for the Network tab; needs `topic read $SYS/#` in the ACL.
+                client.subscribe('$SYS/broker/#', qos=0)
+                broker_link.connected()
+            else:
+                broker_link.event('broker_refused', str(reason_code))
         def on_disconnect(client, userdata, flags, reason_code, properties):
             global mqtt_connected
             mqtt_connected = False
+            broker_link.disconnected(reason_code)
         def report_result(future):
             try:
                 future.result()
             except Exception:
                 log.exception('MQTT reading ingestion failed')
         def on_message(client, userdata, message):
+            if message.topic.startswith('$SYS/'):
+                broker_link.sys_message(message.topic, message.payload)
+                return
             try:
                 reading = mqtt_message(message.topic, message.payload)
                 future = asyncio.run_coroutine_threadsafe(ingest(reading, 'mqtt'), loop)
@@ -496,6 +508,13 @@ def alerts(user: User):
         return [dict(r) for r in db.execute('SELECT * FROM noise_events WHERE user_id=? ORDER BY id DESC LIMIT 50', (user,))]
 
 
+@app.get('/api/network')
+def network(user: User):
+    with connect() as db:
+        return network_summary(db, user, broker_link, bool(MQTT_HOST), mqtt_connected,
+                               f"{MQTT_HOST}:{os.getenv('MQTT_PORT', '1883')}" if MQTT_HOST else None)
+
+
 @app.websocket('/ws')
 async def websocket(ws: WebSocket):
     await ws.accept()
@@ -517,6 +536,11 @@ async def websocket(ws: WebSocket):
             try:
                 remaining = max(0.01, next_check - time.monotonic())
                 message = await asyncio.wait_for(ws.receive_json(), remaining)
+                if isinstance(message, dict) and message.get('type') == 'ping':
+                    # Lets the browser measure its WebSocket round-trip time to this server.
+                    ping_id = message.get('id')
+                    await ws.send_json({'type': 'pong', 'id': ping_id if isinstance(ping_id, int) else None})
+                # No `continue`: frequent pings must not skip the periodic session re-check below.
                 if isinstance(message, dict) and message.get('type') == 'auth' and AUTH_MODE != 'demo':
                     candidate = message.get('token')
                     if not isinstance(candidate, str) or await verify_token(candidate) != user:
