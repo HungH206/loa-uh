@@ -34,12 +34,23 @@ If you use the Vercel site, add its address to `LOA_WEB_ORIGINS=` in `/etc/loa/l
 
 On the iPhone: **Settings › Personal Hotspot**, turn on **Allow Others to Join** and **Maximize Compatibility** (2.4 GHz for the ESP32).
 
-```sh
-sudo nmcli --ask device wifi connect "Harry's IPhone"
-sudo nmcli connection modify "Harry's IPhone" connection.autoconnect-priority 10
-```
+These are **Pi** commands; `nmcli` does not exist on the Mac. First connect from the Mac with `ssh hunghoang@raspberrypi5hoang.local`.
 
-The hotspot name must match exactly, including the apostrophe and capitals. Copy it from the Mac's Wi-Fi menu.
+Save the hotspot **without switching to it**. `nmcli device wifi connect` would switch at once and cut an SSH session that runs over home Wi-Fi.
+
+1. With the hotspot on, check its exact name as the Pi sees it (apostrophe and capitals must match):
+   ```sh
+   nmcli -f SSID device wifi list --rescan yes
+   ```
+2. Add it: `sudo nmtui` › **Edit a connection** › **Add** › **Wi-Fi**. Set **Profile name** and **SSID** to the hotspot name, **Security** to *WPA & WPA2 Personal*, enter the **Password**, then **OK** › **Back** › **Quit**. The Pi stays on home Wi-Fi.
+3. Prefer the hotspot whenever home Wi-Fi is not around (for example at school), and confirm it is saved:
+   ```sh
+   sudo nmcli connection modify "Harry's IPhone" connection.autoconnect-priority 10
+   nmcli connection show
+   ```
+4. Test it: join the Mac to the hotspot, then on the Pi run `sudo nmcli connection up "Harry's IPhone"`. SSH drops, which is expected. Reconnect from the Mac, now also on the hotspot, with `ssh hunghoang@raspberrypi5hoang.local`.
+
+At school, with home Wi-Fi out of range, the Pi joins the hotspot by itself when it starts.
 
 ### A4. ESP32: upload the firmware
 

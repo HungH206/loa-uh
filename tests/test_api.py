@@ -378,3 +378,73 @@ def test_reset_pairing_issues_new_one_time_code(setup):
     assert client.post('/api/devices/claim', headers=auth('bob'), json=claim).status_code == 403  # One-time.
     assert send(client).status_code == 201  # Device token unchanged: firmware keeps working.
     assert [r['device_id'] for r in client.get('/api/readings', headers=auth()).json()] == ['sensor-a']
+
+
+def test_add_device_creates_pairing_code_broker_login_and_acl(setup, tmp_path):
+    import shutil
+    import socket
+    import subprocess
+    import sys
+    import time as clock
+    from pathlib import Path
+    tool = shutil.which('mosquitto_passwd') or '/opt/homebrew/bin/mosquitto_passwd'
+    broker = shutil.which('mosquitto') or '/opt/homebrew/sbin/mosquitto'
+    if not (Path(tool).exists() and Path(broker).exists()):
+        pytest.skip('Mosquitto tools not installed')
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'deploy' / 'pi'))
+    import add_device
+    main, client = setup
+    passwords, acl = tmp_path / 'passwords', tmp_path / 'acl'
+    passwords.write_text(add_device.hashed_password_line('loa-backend', 'backend-secret', tool))
+    acl.write_text('user loa-backend\ntopic read loa/+/noise\n\nuser sensor-a\ntopic write loa/sensor-a/noise\n')
+    created = add_device.add_device('loa-002', 'Test sensor', main.DB_PATH, passwords, acl, db_user=None, tool=tool)
+    with pytest.raises(ValueError, match='already'):
+        add_device.add_device('loa-002', 'Again', main.DB_PATH, passwords, acl, db_user=None, tool=tool)
+    with pytest.raises(ValueError):
+        add_device.add_device('loa-backend', 'Reserved', main.DB_PATH, passwords, acl, db_user=None, tool=tool)
+    assert 'user loa-002\ntopic write loa/loa-002/noise' in acl.read_text()
+    assert (tmp_path / 'acl.before-add-device').exists() and created['device_token'] not in passwords.read_text()
+    # Dashboard pairing: the code works once.
+    claim = {'device_id': 'loa-002', 'claim_code': created['claim_code']}
+    assert client.post('/api/devices/claim', headers=auth(), json=claim).status_code == 200
+    assert client.post('/api/devices/claim', headers=auth('bob'), json=claim).status_code == 403
+    # HTTP ingestion accepts the new token.
+    assert client.post('/api/readings', headers={'Authorization': f"Bearer {created['device_token']}"},
+                       json={'device_id': 'loa-002', 'dbfs': -50}).status_code == 201
+    # A real broker accepts the login for its own topic only.
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+    conf = tmp_path / 'm.conf'
+    conf.write_text(f'listener {port} 127.0.0.1\nallow_anonymous false\npassword_file {passwords}\nacl_file {acl}\n')
+    proc = subprocess.Popen([broker, '-c', str(conf)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        clock.sleep(0.8)
+        import paho.mqtt.client as mqtt
+        def publish(username, password, topic):
+            result = {}
+            c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f'test-{topic}', protocol=mqtt.MQTTv5)
+            c.username_pw_set(username, password)
+            c.on_connect = lambda cl, u, f, rc, p: result.setdefault('connect', rc.value)
+            c.on_publish = lambda cl, u, mid, rc, p: result.setdefault('publish', rc.value)
+            c.connect('127.0.0.1', port)
+            c.loop_start()
+            for _ in range(30):
+                if 'connect' in result:
+                    break
+                clock.sleep(0.1)
+            if result.get('connect') == 0:
+                c.publish(topic, b'{}', qos=1)
+                for _ in range(30):
+                    if 'publish' in result:
+                        break
+                    clock.sleep(0.1)
+            c.loop_stop(); c.disconnect()
+            return result
+        # 0 = accepted; 16 = accepted with no subscribers yet (MQTT 5). 135 = not authorized.
+        own = publish('loa-002', created['device_token'], 'loa/loa-002/noise')
+        assert own['connect'] == 0 and own['publish'] in (0, 16)
+        assert publish('loa-002', 'wrong-token', 'loa/loa-002/noise')['connect'] != 0
+        assert publish('loa-002', created['device_token'], 'loa/sensor-a/noise')['publish'] == 135  # ACL denies.
+    finally:
+        proc.terminate(); proc.wait(5)

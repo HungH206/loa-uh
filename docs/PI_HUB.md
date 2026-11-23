@@ -109,3 +109,16 @@ The installer keeps the Pi's database, `/etc/loa/loa.env`, broker passwords and 
 2. Copy and extract the bundle as above, then run `sudo bash deploy/pi/install.sh` again. It replaces `/opt/loa/backend` and the dashboard and restarts the service.
 3. For the Network tab's broker card, add `topic read $SYS/#` under `user loa-backend` in `/etc/mosquitto/loa/acl`, then run `sudo systemctl reload mosquitto`. The installer does not change an existing ACL.
 4. If you also host the dashboard on Vercel, redeploy it so the Network tab appears there. It reads `/api/network` from the hub at `VITE_BACKEND_URL`.
+
+## Adding another sensor on the Pi
+
+`deploy/pi/add_device.py` adds a sensor to the running hub in one step. It creates the database entry and a one-time pairing code, adds the broker login, adds the ACL entry for `loa/<device_id>/noise`, then reloads Mosquitto. It backs up the broker files first (`*.before-add-device`).
+
+```sh
+# Mac
+scp deploy/pi/add_device.py hunghoang@raspberrypi5hoang.local:~/loa-migration/
+# Pi
+sudo python3 ~/loa-migration/add_device.py loa-002 --label "XIAO ESP32-S3 Sense"
+```
+
+It prints the pairing code for the dashboard and saves `{device_id, claim_code, device_token}` to `~/loa-002.json` on the Pi (private). Copy that file to the Mac under `.local/pi-devices/`, not `.local/` directly: `prepare_pi.py` checks every `.local/*.json` against the Mac broker's accounts. Put `DEVICE_ID` and `DEVICE_TOKEN` in the ESP32's `secrets.h`. Later Pi updates keep the hub's database and broker files, so the device stays registered.

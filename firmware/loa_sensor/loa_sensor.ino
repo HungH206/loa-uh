@@ -57,7 +57,10 @@ static_assert(LOA_PUBLISH_HZ >= 1 && LOA_PUBLISH_HZ <= 20 && SAMPLE_RATE % LOA_P
               "LOA_PUBLISH_HZ must divide 16000 and be between 1 and 20");
 // Each reading is the RMS of every sample in its window: 16,000 samples (1 s) at 1 Hz.
 constexpr int WINDOW_SAMPLES = SAMPLE_RATE / LOA_PUBLISH_HZ;
-constexpr unsigned long RETRY_INTERVAL_MS = 5000;
+constexpr unsigned long RETRY_INTERVAL_MS = 5000;       // MQTT reconnect attempts.
+// Joining a phone hotspot (handshake + DHCP) can take several seconds; restarting the attempt
+// sooner would cut it off every time.
+constexpr unsigned long WIFI_RETRY_MS = 10000;
 // With more than one network: move to the next one after this long without Wi-Fi...
 constexpr unsigned long NETWORK_SWITCH_MS = 20000;
 // ...or after this long with Wi-Fi but no way to reach the Pi (e.g. campus Wi-Fi that isolates devices).
@@ -100,6 +103,7 @@ unsigned long lastWiFiAttempt = 0, lastMQTTAttempt = 0;
 size_t activeNetwork = 0;
 unsigned long networkStartedAt = 0;  // When the current network was chosen or last dropped.
 unsigned long lastReachedPi = 0;     // Last MQTT connection/publish or HTTP 201.
+volatile uint8_t lastWifiReason = 0; // Why the last Wi-Fi attempt failed (set by the Wi-Fi event below).
 // Link timing for Experiment 3, printed as "LINK ..." serial lines.
 unsigned long wifiDownSince = 0, mqttDownSince = 0;
 bool wifiWasUp = false, mqttWasUp = false;
@@ -125,10 +129,21 @@ void setAlertLed(bool on) {
 // ======================================
 // Wi-Fi and MQTT connection
 // ======================================
+void onWiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
+  lastWifiReason = info.wifi_sta_disconnected.reason;
+}
+
+const char* wifiReason() {
+  // Common values: NO_AP_FOUND (name not in range / wrong band), AUTH_FAIL or
+  // 4WAY_HANDSHAKE_TIMEOUT (usually a wrong password), ASSOC_LEAVE (we disconnected).
+  return lastWifiReason ? WiFi.disconnectReasonName((wifi_err_reason_t)lastWifiReason) : "none yet";
+}
+
 void beginNetwork(size_t index) {
   const LoaNetwork& net = NETWORKS[index];
   activeNetwork = index;
   networkStartedAt = lastWiFiAttempt = lastReachedPi = millis();
+  lastWifiReason = 0;
   mqtt.disconnect();
   mqtt.setServer(net.mqtt_host, MQTT_PORT);  // A ".local" name is resolved with mDNS.
   if (net.eap_method >= 0) {
@@ -148,15 +163,26 @@ void beginNetwork(size_t index) {
 
 void switchNetwork(const char* reason) {
   const size_t next = (activeNetwork + 1) % NETWORK_COUNT;
-  Serial.printf("LINK wifi_switch reason=%s from=\"%s\" to=\"%s\"\n", reason, NETWORKS[activeNetwork].ssid, NETWORKS[next].ssid);
+  Serial.printf("LINK wifi_switch reason=%s wifi_error=%s from=\"%s\" to=\"%s\"\n", reason, wifiReason(), NETWORKS[activeNetwork].ssid, NETWORKS[next].ssid);
   WiFi.disconnect();
   beginNetwork(next);
 }
 
 void startWiFi() {
+  WiFi.onEvent(onWiFiDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(DEVICE_ID);  // Shows as e.g. "loa-001" in router / hotspot device lists.
   WiFi.setAutoReconnect(true);
+  // List the networks in range: shows at once whether a configured network is visible,
+  // on which channel and how strong (a missing antenna shows up as no or very weak networks).
+  const int found = WiFi.scanNetworks();
+  Serial.printf("LOA: Wi-Fi scan found %d network(s)\n", found < 0 ? 0 : found);
+  for (int i = 0; i < found && i < 12; ++i) {
+    bool configured = false;
+    for (size_t n = 0; n < NETWORK_COUNT; ++n) configured |= WiFi.SSID(i) == NETWORKS[n].ssid;
+    Serial.printf("  %s \"%s\" ch %d rssi %d dBm\n", configured ? "*" : " ", WiFi.SSID(i).c_str(), WiFi.channel(i), WiFi.RSSI(i));
+  }
+  WiFi.scanDelete();
   // Network time for one-way latency; set once Wi-Fi has internet access.
   configTime(0, 0, LOA_NTP_SERVER);
   beginNetwork(0);
@@ -182,9 +208,9 @@ void maintainNetwork() {
     }
     if (NETWORK_COUNT > 1 && now - networkStartedAt >= NETWORK_SWITCH_MS) {
       switchNetwork("no_wifi");
-    } else if (now - lastWiFiAttempt >= RETRY_INTERVAL_MS) {
+    } else if (now - lastWiFiAttempt >= WIFI_RETRY_MS) {
       lastWiFiAttempt = now;
-      Serial.println("LOA: Retrying Wi-Fi...");
+      Serial.printf("LOA: Retrying Wi-Fi \"%s\" (last error: %s)...\n", NETWORKS[activeNetwork].ssid, wifiReason());
       WiFi.reconnect();
     }
     return;
