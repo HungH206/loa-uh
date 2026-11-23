@@ -358,3 +358,23 @@ def test_network_tab_statistics_and_websocket_ping(setup, monkeypatch):
         assert ws.receive_json()['type'] == 'ready'
         ws.send_json({'type': 'ping', 'id': 7})
         assert ws.receive_json() == {'type': 'pong', 'id': 7}
+
+
+def test_reset_pairing_issues_new_one_time_code(setup):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+    import reset_pairing
+    main, client = setup
+    assert pair(client, user='bob').status_code == 200
+    with pytest.raises(ValueError):
+        reset_pairing.reset(main.DB_PATH, 'missing-sensor')
+    code, was_paired = reset_pairing.reset(main.DB_PATH, 'sensor-a')
+    assert was_paired and len(code) == 32
+    assert [d['device_id'] for d in client.get('/api/status', headers=auth('bob')).json()['devices']] == []
+    assert pair(client).status_code == 403  # The original code stays used up.
+    claim = {'device_id': 'sensor-a', 'claim_code': code}
+    assert client.post('/api/devices/claim', headers=auth(), json=claim).status_code == 200
+    assert client.post('/api/devices/claim', headers=auth('bob'), json=claim).status_code == 403  # One-time.
+    assert send(client).status_code == 201  # Device token unchanged: firmware keeps working.
+    assert [r['device_id'] for r in client.get('/api/readings', headers=auth()).json()] == ['sensor-a']
