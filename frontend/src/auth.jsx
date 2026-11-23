@@ -34,7 +34,7 @@ export function retryHubNow() {nextHubAttempt = 0;}
 export async function hubApi(path,options={}) {
   const token = await accessToken();
   const response = await fetch(`${backendOrigin}/api/${path}`,{...options,signal:AbortSignal.timeout(5000),headers:{...(options.body ? {'Content-Type':'application/json'} : {}),...options.headers,...(token ? {Authorization:`Bearer ${token}`} : {})}});
-  if (!response.ok) {const b=await response.json().catch(()=>({}));throw new Error(typeof b.detail === 'string' ? b.detail : `Request failed (${response.status})`);}
+  if (!response.ok) {const b=await response.json().catch(()=>({}));const e=new Error(typeof b.detail === 'string' ? b.detail : `Request failed (${response.status})`);e.status=response.status;throw e;}
   return response.json();
 }
 export async function api(path, options={}) {
@@ -50,7 +50,14 @@ export async function api(path, options={}) {
   if(resource==='devices/browser') return m.register(JSON.parse(options.body).label);
   if(resource==='browser/readings') return m.record(JSON.parse(options.body));
   if(resource==='browser/stop'){m.stop(JSON.parse(options.body).device_id);return {};}
-  if(resource==='devices/claim') {try{return await hubApi(path,options);}catch(e){throw new Error(`Cannot pair while the hub is unavailable: ${e.message}`);}}
+  if(resource==='devices/claim') {
+    try{return await hubApi(path,options);}
+    catch(e){
+      // The hub answered (e.g. wrong or already-used code): show its reason, not "unavailable".
+      if(e.status) throw new Error(e.status===403 ? `${e.message}. Pairing codes work once; a sensor that is already paired appears under Your microphone for the account that paired it.` : e.message);
+      throw new Error(`Cannot pair while the hub is unavailable: ${e.message}`);
+    }
+  }
   if(['status','alerts','readings'].includes(resource)) {
     let remote=null;
     if(backendOrigin && Date.now()>=nextHubAttempt) {
