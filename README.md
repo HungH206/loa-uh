@@ -116,6 +116,18 @@ npm run build
 
 Tests cover account isolation, one-time pairing, device credentials, private WebSockets, validation, duration/cooldown/peak tracking, duplicates, sensor gaps/reboots, persistence, and mocked Supabase token verification. Physical Wi-Fi/microphone behavior, real email delivery/login, and iPhone rendering require device checks.
 
+## Pi hub button and Raspberry Pi Connect
+
+The **Pi hub** button in the dashboard header shows whether the site can reach your Raspberry Pi hub.
+
+- **Cloud site (Vercel):** the button opens a panel where you can enter the hub address. Before saving, the site checks that the address is an LOA hub on the same Supabase project and that it accepts your sign-in. The address is saved in this browser only and replaces the site's built-in `VITE_BACKEND_URL` until you choose **Use the site's built-in address**.
+  - Use the Pi's **HTTPS Tailscale address** (for example `https://raspberrypi.your-tailnet.ts.net`), and keep the phone or laptop signed in to Tailscale. Browsers block `http://` LAN addresses from an HTTPS page.
+  - Add the site's origin to `LOA_WEB_ORIGINS` on the hub and restart it.
+  - **Retry now** skips the 30-second wait between connection attempts.
+- **Dashboard served by the Pi:** the panel shows the live connection status only.
+
+**Raspberry Pi Connect** (linked from the panel) gives remote screen sharing and a remote shell for the Pi from any network. It is useful for maintenance: restarting `loa`, reading `journalctl`, or opening `http://localhost:8000` in the Pi's own browser over screen sharing. It does not forward the Pi's web ports, so the dashboard's data connection cannot run through it. Use Tailscale (or the LAN) for that.
+
 ## Network tab: showing connectivity
 
 The dashboard's **Network** tab shows the whole path a reading takes, refreshed every 2 seconds: **sensor → (Wi-Fi, MQTT) → Mosquitto broker → backend → (WebSocket) → this browser**. Each hop is green (working), amber (sensor silent for more than 3 s), red (down) or grey (not used; for example, the broker is bypassed when a sensor sends over HTTP).

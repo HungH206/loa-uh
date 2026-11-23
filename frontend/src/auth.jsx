@@ -2,10 +2,21 @@ import React, {useEffect, useState} from 'react';
 import {createClient} from '@supabase/supabase-js';
 import {cloudRequest} from './cloud-api';
 import {SessionMonitor} from './session-monitor';
+import {loadHubOverride, normalizeHubUrl} from './hub.js';
 
 const env = import.meta.env;
-export const backendOrigin = (env.VITE_BACKEND_URL || '').replace(/\/$/, '');
 export const cloudMode = Boolean(env.VITE_SUPABASE_URL && env.VITE_SUPABASE_PUBLISHABLE_KEY);
+export const supabaseUrl = env.VITE_SUPABASE_URL || '';
+// The hub address built into the site, and an optional one chosen in this browser (cloud mode only;
+// a dashboard served by the Pi itself always talks to its own origin).
+export const configuredHubOrigin = (env.VITE_BACKEND_URL || '').replace(/\/$/, '');
+function storedHub() {
+  if (!cloudMode || typeof localStorage === 'undefined') return '';
+  try {return normalizeHubUrl(loadHubOverride(localStorage), location.protocol);} catch {return '';}
+}
+const chosenHub = storedHub();
+export const hubOverridden = Boolean(chosenHub) && chosenHub !== configuredHubOrigin;
+export const backendOrigin = chosenHub || configuredHubOrigin;
 export let supabase = null;
 let monitor, owner, hubCache = [], nextHubAttempt = 0;
 function localMonitor(user) {
@@ -18,6 +29,8 @@ export async function accessToken() {
   if (error) throw error;
   return data.session?.access_token;
 }
+// Lets the hub button retry immediately instead of waiting out the 30-second back-off.
+export function retryHubNow() {nextHubAttempt = 0;}
 export async function hubApi(path,options={}) {
   const token = await accessToken();
   const response = await fetch(`${backendOrigin}/api/${path}`,{...options,signal:AbortSignal.timeout(5000),headers:{...(options.body ? {'Content-Type':'application/json'} : {}),...options.headers,...(token ? {Authorization:`Bearer ${token}`} : {})}});

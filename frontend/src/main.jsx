@@ -7,6 +7,7 @@ import './style.css';
 import {BrowserMicrophone} from './microphone';
 import {DisturbanceReports} from './reports';
 import {NetworkPanel} from './network';
+import {HubControl} from './hub-control';
 
 const clock = t => new Date(t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
 const dateTime = t => new Date(t*1000).toLocaleString();
@@ -118,7 +119,7 @@ function App({account}) {
   }
   return <div className="shell">
     <aside><a className="brand" href="/"><span className="brand-icon"><Waves/></span>loa<span className="brand-dot">.</span></a><div className="workspace">YOUR WORKSPACE <span>01</span></div><nav>{[['Overview',Activity],['Noise history',Waves],['Alerts',Bell],['Settings',SlidersHorizontal],['Network',Network],['Report disturbance',MessageSquarePlus]].map(([name,Icon]) => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}><Icon size={18}/>{name}{name === 'Alerts' && <small>{deviceAlerts.length}</small>}</button>)}</nav><div className="aside-bottom"><Radio size={20}/><strong>Small device.<br/>A quieter perspective.</strong><p>Listen. Observe. Alert.</p><span>LOA / NETWORKING PROJECT</span></div></aside>
-    <main><header><span>{account.email}</span><div className="account-actions"><div className="live"><i className={connected ? '' : 'off'}/>{cloudMode ? status?.hub_online ? 'Hub connected' : 'Hub offline · cloud available' : connected ? 'Live connection' : 'Reconnecting…'}</div>{!account.demo && <button className="text-button" onClick={async () => {const {error} = await supabase.auth.signOut(); if (error) setError(error.message);}}><LogOut size={14}/> Sign out</button>}</div></header>
+    <main><header><span>{account.email}</span><div className="account-actions"><HubControl hubOnline={Boolean(status?.hub_online)} liveConnected={connected} onRetry={refresh}/><div className="live"><i className={connected ? '' : 'off'}/>{cloudMode ? status?.hub_online ? 'Hub connected' : 'Hub offline · cloud available' : connected ? 'Live connection' : 'Reconnecting…'}</div>{!account.demo && <button className="text-button" onClick={async () => {const {error} = await supabase.auth.signOut(); if (error) setError(error.message);}}><LogOut size={14}/> Sign out</button>}</div></header>
     <section className="title"><div><div className="eyebrow">YOUR ENVIRONMENT, IN FOCUS</div><h1>{tab === 'Report disturbance' ? 'Tell us what you heard.' : tab === 'Network' ? 'Every hop, accounted for.' : tab === 'Overview' ? 'A little more aware.' : tab === 'Noise history' ? 'Every moment, measured.' : tab === 'Alerts' ? 'Know when it gets loud.' : 'Make quiet your own.'}</h1><p>Understand the sound around you. Make room for quiet.</p></div><div className="title-actions"><button className="export report-trigger" onClick={() => setTab('Report disturbance')}><MessageSquarePlus size={16}/> Report disturbance</button><button className="export" onClick={download} disabled={!visible.length}><Download size={16}/> Export data</button></div></section>
     {error && <div role="alert" className="error">{error}<button className="text-button" onClick={() => setError('')}>Dismiss</button></div>}
     {notice && <div role="status" className="demo">{notice}</div>}
